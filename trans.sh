@@ -2014,6 +2014,7 @@ $(
             fi
             if is_need_set_ssh_keys; then
                 echo 'settings.PasswordAuthentication = false;'
+                echo 'settings.KbdInteractiveAuthentication = false;'
             fi
             if [ "$username" = root ] && ! is_need_set_ssh_keys; then
                 echo 'settings.PermitRootLogin = "yes";'
@@ -4430,7 +4431,7 @@ set_ssh_keys_and_del_password() {
     fi
 }
 
-_is_ssh_kv_effective() {
+is_ssh_kv_effective() {
     local os_dir=$1
     local key=$2
     local value=$3
@@ -4445,48 +4446,33 @@ _is_ssh_kv_effective() {
     fi
 
     # centos 7 / ubuntu 22.04 不支持 -G
+    # -G 只检测配置文件
+    # -T 会检测配置文件、host key
     if res=$(chroot "$os_dir" sshd -G 2>/dev/null || chroot "$os_dir" sshd -T 2>/dev/null); then
         # 删除自己创建的，避免后续权限不准确
         if $we_create_run_sshd_dir; then
             rm -rf "$os_dir/run/sshd"
         fi
-        printf "%s\n" "$res" | grep -Fxiq "$key $value"
+
+        # centos 7 设置 prohibit-password ，sshd -T 会显示成 without-password
+        printf "%s\n" "$res" |
+            sed 's/^permitrootlogin without-password$/permitrootlogin prohibit-password/i' |
+            if [ -n "$value" ]; then
+                grep -F -xiq "$key $value"
+            else
+                # value 为空时，只验证 key 是否存在
+                grep -E -xiq "$key .*"
+            fi
     else
         error_and_exit "Failed to verify sshd config."
     fi
-}
-
-is_ssh_kv_effective() {
-    local os_dir=$1
-    local key=$2
-    local value=$3
-
-    if _is_ssh_kv_effective "$os_dir" "$key" "$value"; then
-        return 0
-    fi
-
-    # centos 7 设置 prohibit-password ，sshd -T 会显示成 without-password
-    if [ "$(echo "$key" | to_lower)" = "permitrootlogin" ] && {
-        [ "$(echo "$value" | to_lower)" = "prohibit-password" ] ||
-            [ "$(echo "$value" | to_lower)" = "without-password" ]
-    }; then
-        if _is_ssh_kv_effective "$os_dir" "permitrootlogin" "prohibit-password" ||
-            _is_ssh_kv_effective "$os_dir" "permitrootlogin" "without-password"; then
-            return 0
-        fi
-    fi
-
-    return 1
 }
 
 change_ssh_conf_if_different() {
     local os_dir=$1
     local key=$2
     local value=$3
-    local sub_conf=$4
-    if [ -z "$sub_conf" ]; then
-        sub_conf=$(echo "01-$key.conf" | to_lower)
-    fi
+    local explicit=${4:-false} # 是否需要显式设置
 
     # 有些发行版自带了某些配置，例如
     # ubuntu:
@@ -4497,8 +4483,8 @@ change_ssh_conf_if_different() {
     # cat /etc/ssh/sshd_config.d/9999999gentoo-pam.conf | grep -i PasswordAuthentication
     # PasswordAuthentication no
 
-    # 0. 如果已经有这个配置，则不修改，避免不必要的改动
-    if is_ssh_kv_effective "$os_dir" "$key" "$value"; then
+    # 0. 如果已经有这个配置，且不需要显式设置，则不修改
+    if is_ssh_kv_effective "$os_dir" "$key" "$value" && ! $explicit; then
         return
     fi
 
@@ -4516,7 +4502,7 @@ change_ssh_conf_if_different() {
         { grep -iq "$include_line" $os_dir/etc/ssh/sshd_config ||
             grep -iq "$include_line" $os_dir/usr/etc/ssh/sshd_config; } 2>/dev/null; then
         mkdir -p $os_dir/etc/ssh/sshd_config.d/
-        echo "$key $value" >"$os_dir/etc/ssh/sshd_config.d/$sub_conf"
+        echo "$key $value" >"$os_dir/etc/ssh/sshd_config.d/01-$(echo "$key" | to_lower).conf"
     else
         # 3. 写入 sshd_config
         #    如果 sshd_config 存在此 key (无论是否已注释)，则替换，包括删除注释
@@ -4544,6 +4530,34 @@ change_ssh_conf_for_key_login() {
     if [ "$username" = root ]; then
         change_ssh_conf_if_different "$os_dir" PermitRootLogin prohibit-password
     fi
+
+    # sshd -G/-T 有 ChallengeResponseAuthentication 说明是旧版 sshd
+    # 才需要设置 ChallengeResponseAuthentication no
+
+    # OpenSSH 8.6 和以下 (包括 el8/debian 11/ubuntu 20.04 等)
+    # KbdInteractiveAuthentication ChallengeResponseAuthentication 可设置成不同的值
+    # 如果没有显式设置 ChallengeResponseAuthentication no
+    # 则 KbdInteractiveAuthentication no 不会生效 (sshd -G/-T 显示 KbdInteractiveAuthentication yes)
+
+    # 因此先 sshd -G/-T 检测有没有 ChallengeResponseAuthentication 这个 key
+    # 只要有就显式设置为 no
+    # 而且要先设置 ChallengeResponseAuthentication 后设置 KbdInteractiveAuthentication
+    # 否则 change_ssh_conf_if_different 设置 KbdInteractiveAuthentication no 时会检测到不生效而报错
+
+    # 用户传进来的 rhel-like 系统可能是支持 ChallengeResponseAuthentication 的旧版本
+    # 因此即使 el8/debian 11/ubuntu 20.04 都 EOL 后也不能删除这里
+    if is_ssh_kv_effective "$os_dir" ChallengeResponseAuthentication; then
+        change_ssh_conf_if_different "$os_dir" ChallengeResponseAuthentication no true
+    fi
+
+    # PasswordAuthentication no
+    # KbdInteractiveAuthentication yes (默认是 yes)
+    # 这种情况可以用密码登录
+    # ssh -o PreferredAuthentications=keyboard-interactive user@ip
+
+    # 多数发行版都会在 sshd_config 里设置成 no
+    # 但 opensuse 16 没有
+    change_ssh_conf_if_different "$os_dir" KbdInteractiveAuthentication no
 }
 
 change_ssh_conf_for_password_login() {
