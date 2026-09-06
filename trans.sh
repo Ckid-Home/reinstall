@@ -425,13 +425,18 @@ setup_nginx() {
 
 setup_websocketd() {
     apk add websocketd
-    wget $confhome/logviewer.html -O /tmp/index.html
     apk add coreutils
+
+    mkdir -p /tmp/web
+    echo 'Wrong Path' >/tmp/web/index.html
+    # shellcheck disable=SC2154
+    wget $confhome/logviewer.html -O /tmp/web$web_path
 
     killall -q websocketd || true
     # websocketd 遇到 \n 才推送，因此要转换 \r 为 \n
-    websocketd --port "$web_port" --loglevel=fatal --staticdir=/tmp \
-        stdbuf -oL -eL sh -c "tail -fn+0 /reinstall.log | tr '\r' '\n' | grep -Fiv -e password -e token" &
+    websocketd --port "$web_port" --loglevel=fatal --staticdir=/tmp/web \
+        stdbuf -oL -eL \
+        sh -c "if [ \"\$PATH_INFO\" = \"$web_path\" ]; then tail -fn+0 /reinstall.log | tr '\r' '\n' | grep -Fiv -e password -e token; fi" &
 }
 
 get_approximate_ram_size() {

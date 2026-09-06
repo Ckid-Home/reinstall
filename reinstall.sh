@@ -732,6 +732,10 @@ assert_cpu_supports_x86_64_v3() {
     fi
 }
 
+get_http_log_url() {
+    echo "http://IP$([ "${web_port:-80}" = 80 ] || echo :$web_port)$web_path"
+}
+
 # 判断语言字符是否合法，允许全名和缩写
 is_valid_lang_chars() {
     [[ "$1" =~ ^[A-Za-z_-]+$ ]]
@@ -3505,7 +3509,7 @@ build_extra_cmdline() {
     # https://salsa.debian.org/installer-team/rootskel/-/blob/master/src/lib/debian-installer-startup.d/S02module-params?ref_type=heads
     for key in confhome hold force_boot_mode force_cn force_old_windows_setup cloud_image main_disk \
         elts deb_mirror \
-        username ssh_port rdp_port web_port allow_ping; do
+        username ssh_port rdp_port web_port web_path allow_ping; do
         value=${!key}
         if [ -n "$value" ]; then
             is_need_quote "$value" &&
@@ -4113,6 +4117,10 @@ get_ip_conf_cmd() {
             echo "'$sh' '$ipv6_mac' '' '' '$ipv6_addr' '$ipv6_gateway' '$is_in_china' '$ipv6_extra_addrs'"
         fi
     fi
+}
+
+is_need_web_viewer() {
+    ! { [ "$distro" = netboot.xyz ] || is_alpine_live; }
 }
 
 mod_initrd_alpine() {
@@ -5139,6 +5147,11 @@ if [ "$nextos_distro" = alpine ] || is_distro_like_debian "$nextos_distro"; then
     mod_initrd
 fi
 
+# web 路径
+if is_need_web_viewer; then
+    web_path="/$(tr -dc "A-Za-z0-9" </dev/urandom | head -c8)"
+fi
+
 # 将内核/netboot.xyz.lkrn 放到正确的位置
 if false && is_need_boot_vmlinuz; then
     if is_in_windows; then
@@ -5350,7 +5363,7 @@ elif [ "$distro" = fnos ]; then
         echo "Password: $password"
     fi
     echo "SSH Port: $ssh_port"
-    echo "WEB Port: $web_port"
+    echo "WEB: $(get_http_log_url)"
 
     info "After Install"
 
@@ -5365,7 +5378,7 @@ elif [ "$distro" = windows ]; then
     echo "Username: $username"
     echo "Password: $password"
     echo "SSH Port: $ssh_port"
-    echo "WEB Port: $web_port"
+    echo "WEB: $(get_http_log_url)"
 
     info "After Install"
     if is_administrator_username "$username"; then
@@ -5385,7 +5398,7 @@ elif [ "$distro" = dd ]; then
         echo "Password: $password"
     fi
     echo "SSH Port: $ssh_port"
-    echo "WEB Port: $web_port"
+    echo "WEB: $(get_http_log_url)"
 
     info "After Install"
     if [ -n "$cloud_data" ]; then
@@ -5408,7 +5421,7 @@ else
         echo "Password: $password"
     fi
     echo "SSH Port: $ssh_port"
-    echo "WEB Port: $web_port"
+    echo "WEB: $(get_http_log_url)"
 
     info "After Install"
     echo "Username: $username"
