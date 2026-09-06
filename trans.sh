@@ -1730,6 +1730,7 @@ install_alpine() {
         # 但不加 chroot 默认添加到 default
         chroot /os rc-update add frpc boot
         cp -f /configs/frpc.* /os/etc/frp/
+        chmod 600 /os/etc/frp/frpc.*
     fi
 
     # setup-disk 会自动选择固件，但不包括微码？
@@ -2041,10 +2042,8 @@ $(cat /configs/frpc.* | add_space 4)
 EOF
             else
                 # 直接使用原始文件
-                (
-                    umask 077
-                    cp /configs/frpc.* /os/etc/nixos/
-                )
+                cp /configs/frpc.* /os/etc/nixos/
+                chmod 600 /os/etc/nixos/frpc.*
                 ext=$(basename /configs/frpc.* | awk -F. '{print $NF}')
                 cat <<EOF
 services.frp = {
@@ -2209,6 +2208,7 @@ add_frpc_systemd_service_if_need() {
 
         # frpc conf
         cp -f /configs/frpc.* "$os_dir/usr/local/etc/frpc/"
+        chmod 600 $os_dir/usr/local/etc/frpc/frpc.*
 
         # 添加服务
         add_systemd_service "$os_dir" frpc
@@ -8548,6 +8548,7 @@ fi
 # 并防止重复运行
 if ls /configs/frpc.* >/dev/null 2>&1 && ! pidof frpc >/dev/null; then
     info 'run frpc'
+    chmod 600 /configs/frpc.*
     add_community_repo
     apk add frp
     while true; do
