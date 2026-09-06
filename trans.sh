@@ -6930,7 +6930,7 @@ install_windows() {
         # 厂商驱动
         case "$vendor" in
         aws)
-            if is_nt_ver_ge 6.1 && { [ "$arch_wim" = x86_64 ] || [ "$arch_wim" = arm64 ]; }; then
+            if { [ "$arch_wim" = x86_64 ] || [ "$arch_wim" = arm64 ]; }; then
                 add_driver_aws
             fi
             ;;
@@ -7125,40 +7125,72 @@ EOF
     }
 
     # aws nitro
+    # https://s3.amazonaws.com/ec2-windows-drivers-downloads/
+    # https://s3.cn-north-1.amazonaws.com.cn/ec2-windows-drivers-downloads-cn/
     # https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/aws-nvme-drivers.html
     # https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/enhanced-networking-ena.html
+    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/other-windows-device-drivers.html
     add_driver_aws() {
         info "Add drivers: AWS"
 
-        # 未打补丁的 win7 无法使用 sha256 签名的驱动
-        nvme_ver=$(
-            case "$nt_ver" in
-            6.1) echo 1.3.2 ;; # sha1 签名
-            6.2 | 6.3) echo 1.5.1 ;;
-            *) echo Latest ;;
-            esac
-        )
+        download_and_cp_aws_driver() {
+            local driver_dir=$1
+            local file=$2
+            local ver=$3
 
-        ena_ver=$(
-            case "$nt_ver" in
-            6.1) $support_sha256 && echo 2.2.3 || echo 2.1.4 ;;
-            6.2 | 6.3) echo 2.6.0 ;;
-            *) echo Latest ;;
-            esac
-        )
+            local arch_dir
+            [ "$arch_wim" = arm64 ] && arch_dir=/ARM64 || arch_dir=
 
-        [ "$arch_wim" = arm64 ] && arch_dir=/ARM64 || arch_dir=
+            local unzip_dir=$drv/aws/$driver_dir
+            mkdir -p "$unzip_dir"
+            download "$(get_aws_repo)/${driver_dir}${arch_dir}/$ver/$file" "$drv/aws/$file"
+            unzip -o -d "$unzip_dir" "$drv/aws/$file"
+            cp_drivers "$unzip_dir"
+        }
 
+        # nvme
         # arm64 的 AWSNVMe.zip 已从服务器删除
-        if ! [ "$arch_wim" = arm64 ]; then
-            download "$(get_aws_repo)/NVMe$arch_dir/$nvme_ver/AWSNVMe.zip" $drv/AWSNVMe.zip
-            unzip -o -d $drv/aws/ $drv/AWSNVMe.zip
+        if is_nt_ver_ge 6.1 && [ "$arch_wim" = x86_64 ]; then
+            nvme_ver=$(
+                case "$nt_ver" in
+                6.1) echo 1.3.2 ;; # sha1 签名
+                6.2 | 6.3) echo 1.5.1 ;;
+                *) echo Latest ;;
+                esac
+            )
+            download_and_cp_aws_driver NVMe AWSNVMe.zip "$nvme_ver"
         fi
 
-        download "$(get_aws_repo)/ENA$arch_dir/$ena_ver/AwsEnaNetworkDriver.zip" $drv/AwsEnaNetworkDriver.zip
-        unzip -o -d $drv/aws/ $drv/AwsEnaNetworkDriver.zip
+        # ena
+        # 有 x64 和 amd64
+        if is_nt_ver_ge 6.1; then
+            ena_ver=$(
+                case "$nt_ver" in
+                6.1) $support_sha256 && echo 2.2.3 || echo 2.1.4 ;;
+                6.2 | 6.3) echo 2.6.0 ;;
+                *) echo Latest ;;
+                esac
+            )
+            download_and_cp_aws_driver ENA AwsEnaNetworkDriver.zip "$ena_ver"
+        fi
 
-        cp_drivers $drv/aws
+        # vmclock
+        # 只有 x64，inf 不限系统版本
+        # win8 设备管理器显示的硬件 id 如下
+        # ACPI\VEN_AMZN&DEV_C10C
+        # ACPI\AMZNC10C
+        # *AMZNC10C
+        # win7 下少了第一个，第一个也是 inf 里面匹配的，因此 win7 不会自动安装这个驱动，需要手动安装
+        if [ "$arch_wim" = x86_64 ] && $support_sha256; then
+            # sha256 签名
+            download_and_cp_aws_driver AWSVMClock AWSVMClock.zip Latest
+        fi
+
+        # serial
+        if [ "$arch_wim" = x86_64 ]; then
+            # sha1 签名
+            download_and_cp_aws_driver AWSPCISerialDriver AWSPCISerialDriver.zip Latest
+        fi
     }
 
     # citrix xen
