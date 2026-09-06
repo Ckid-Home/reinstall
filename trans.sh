@@ -7382,16 +7382,32 @@ EOF
         local baseurl=https://fedorapeople.org/groups/virt/virtio-win/direct-downloads
 
         add_driver_virtio_from_rpm() {
-            # fedorapeople may reject or timeout on some VPS IPs, and DaoCloud may still fetch from it.
-            # The CentOS Stream x86_64 repo publishes this noarch RPM with Windows x86/x64 virtio drivers.
-            local url=https://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/Packages/virtio-win-1.9.45-1.el10.noarch.rpm
-            local cpio_file
+            # fedorapeople 拉黑了华为云，可能有其他厂商也被拉黑
+            # DaoCloud 只支持 ipv4
+            # 因此这里用 rocky 的 virtio-win rpm 作为 fallback，但只有 x86/x64 驱动
+
+            # rocky 的 virtio-win 比 centos 新
+            # https://pkgs.org/download/virtio-win
 
             info "Add drivers: Generic virtio rpm"
+
+            local ROCKY_RELEASEVER=10
+
+            if is_in_china; then
+                local rocky_mirror=https://mirror.nju.edu.cn/rocky
+            else
+                local rocky_mirror=https://dl.rockylinux.org/pub/rocky
+            fi
+            local rocky_mirror_os="$rocky_mirror/$ROCKY_RELEASEVER/AppStream/x86_64/os"
+
+            primary_xml_gz=$(wget -O- "$rocky_mirror_os/repodata/repomd.xml" |
+                grep -Eo 'repodata/[0-9a-f]+-primary.xml.gz' | grep .)
+            virtio_win_rpm_path=$(wget -O- "$rocky_mirror_os/$primary_xml_gz" | zcat |
+                grep -Eo 'Packages/v/virtio-win-[^"]+\.noarch\.rpm' | sort -Vr | head -1 | grep .)
+
+            download "$rocky_mirror_os/$virtio_win_rpm_path" $drv/virtio.rpm
+
             apk add 7zip
-
-            download "$url" $drv/virtio.rpm
-
             mkdir -p $drv/virtio-rpm/stage $drv/virtio-rpm/root
             7z x $drv/virtio.rpm -o$drv/virtio-rpm/stage -y -bb1
             cpio_file=$(find $drv/virtio-rpm/stage -maxdepth 1 -name '*.cpio' | head -1)
@@ -7401,6 +7417,7 @@ EOF
             find $drv/virtio-rpm/root -type f -ipath "*/$virtio_sys/$arch/*.inf" "$@" | grep . >/dev/null ||
                 error_and_exit "Can't find $virtio_sys/$arch drivers in virtio-win rpm."
             cp_drivers $drv/virtio-rpm/root "$@"
+            apk del 7zip
         }
 
         get_latest_virtio_dir() {
