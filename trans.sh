@@ -263,6 +263,11 @@ download_via_browser() {
     create_alpine_rootfs "$os_dir" true
     apk add --root "$os_dir" chromium-headless-shell npm
 
+    # 添加 swap
+    # 否则 512M 内存会报错 browserContext.newPage: Target crashed
+    local swapfile=$os_dir/swapfile
+    create_swap_if_ram_less_than 1024 "$swapfile"
+
     # 安装 playwright
     # shellcheck disable=SC2046
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
@@ -278,6 +283,12 @@ download_via_browser() {
     wget "$confhome/download-via-browser.js" -O "$os_dir/work/download-via-browser.js"
     retry 5 chroot "$os_dir" node /work/download-via-browser.js "$url" "/work/download_file"
     cp "$os_dir/work/download_file" "$path"
+
+    # 删除 swap
+    if [ -f "$swapfile" ]; then
+        swapoff "$swapfile"
+        rm -f "$swapfile"
+    fi
 
     # 清理
     remove_alpine_rootfs "$os_dir"
