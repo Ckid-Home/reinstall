@@ -1458,15 +1458,18 @@ Continue?
 
         if is_use_cloud_image; then
             # cloud image
-            # https://salsa.debian.org/cloud-team/debian-cloud-images/-/tree/master/config_space/bookworm/files/etc/default/grub.d
-            # cloud 包括各种奇怪的优化，例如不显示 grub 菜单
-            # 因此使用 nocloud
-            if false; then
-                is_virt && ci_type=genericcloud || ci_type=generic
-            else
-                ci_type=nocloud
+            if [ -z "$img" ]; then
+                # https://salsa.debian.org/cloud-team/debian-cloud-images/-/tree/master/config_space/bookworm/files/etc/default/grub.d
+                # cloud 包括各种奇怪的优化，例如不显示 grub 菜单
+                # 因此使用 nocloud
+                if false; then
+                    is_virt && ci_type=genericcloud || ci_type=generic
+                else
+                    ci_type=nocloud
+                fi
+                img=$cdimage_mirror/cloud/$codename/latest/debian-$releasever-$ci_type-$basearch_alt.qcow2
             fi
-            set_osvar img "$cdimage_mirror/cloud/$codename/latest/debian-$releasever-$ci_type-$basearch_alt.qcow2"
+            set_osvar img "$img"
         else
             # 传统安装
             initrd_dir=dists/$codename/main/installer-$basearch_alt/current/images/netboot/debian-installer/$basearch_alt
@@ -1527,39 +1530,42 @@ Continue?
 
         if is_use_cloud_image; then
             # cloud image
-            if is_in_china; then
-                # 有的源没有 releases 镜像
-                # https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/releases/
-                #   https://unicom.mirrors.ustc.edu.cn/ubuntu-cloud-images/releases/
-                #            https://mirror.nju.edu.cn/ubuntu-cloud-images/releases/
+            if [ -z "$img" ]; then
+                if is_in_china; then
+                    # 有的源没有 releases 镜像
+                    # https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/releases/
+                    #   https://unicom.mirrors.ustc.edu.cn/ubuntu-cloud-images/releases/
+                    #            https://mirror.nju.edu.cn/ubuntu-cloud-images/releases/
 
-                # mirrors.cloud.tencent.com
-                ci_mirror=https://mirror.nju.edu.cn/ubuntu-cloud-images
-            else
-                ci_mirror=https://cloud-images.ubuntu.com
-            fi
-
-            # 以下版本有 minimal 镜像
-            # amd64 所有
-            # arm64 24.04 和以上
-            is_have_minimal_image() {
-                [ "$basearch_alt" = amd64 ] || [ "${releasever%.*}" -ge 24 ]
-            }
-
-            basearch_img=$basearch_alt
-            if [ "$basearch_alt" = amd64 ] && [ "${releasever%.*}" -ge 26 ] && is_cpu_supports_x86_64_v3; then
-                basearch_img=amd64v3
-            fi
-
-            if [ "$minimal" = 1 ]; then
-                if ! is_have_minimal_image; then
-                    error_and_exit "Minimal cloud image is not available for $releasever $basearch_alt."
+                    # mirrors.cloud.tencent.com
+                    ci_mirror=https://mirror.nju.edu.cn/ubuntu-cloud-images
+                else
+                    ci_mirror=https://cloud-images.ubuntu.com
                 fi
-                set_osvar img "$ci_mirror/minimal/releases/$codename/release/ubuntu-$releasever-minimal-cloudimg-$basearch_img.img"
-            else
-                # 用 codename 而不是 releasever，可减少一次跳转
-                set_osvar img "$ci_mirror/releases/$codename/release/ubuntu-$releasever-server-cloudimg-$basearch_img.img"
+
+                # 以下版本有 minimal 镜像
+                # amd64 所有
+                # arm64 24.04 和以上
+                is_have_minimal_image() {
+                    [ "$basearch_alt" = amd64 ] || [ "${releasever%.*}" -ge 24 ]
+                }
+
+                basearch_img=$basearch_alt
+                if [ "$basearch_alt" = amd64 ] && [ "${releasever%.*}" -ge 26 ] && is_cpu_supports_x86_64_v3; then
+                    basearch_img=amd64v3
+                fi
+
+                if [ "$minimal" = 1 ]; then
+                    if ! is_have_minimal_image; then
+                        error_and_exit "Minimal cloud image is not available for $releasever $basearch_alt."
+                    fi
+                    img=$ci_mirror/minimal/releases/$codename/release/ubuntu-$releasever-minimal-cloudimg-$basearch_img.img
+                else
+                    # 用 codename 而不是 releasever，可减少一次跳转
+                    img=$ci_mirror/releases/$codename/release/ubuntu-$releasever-server-cloudimg-$basearch_img.img
+                fi
             fi
+            set_osvar img "$img"
         else
             # 传统安装
             if is_in_china; then
@@ -1606,7 +1612,10 @@ Continue?
 
         if is_use_cloud_image; then
             # cloud image
-            set_osvar img "$mirror/images/latest/Arch-Linux-x86_64-cloudimg.qcow2"
+            if [ -z "$img" ]; then
+                img=$mirror/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            fi
+            set_osvar img "$img"
         else
             # 传统安装
             case "$basearch" in
@@ -1646,19 +1655,22 @@ Continue?
         dir=releases/$basearch_alt/autobuilds
 
         if is_use_cloud_image; then
-            # 使用 systemd 且没有 cloud-init
-            prefix=di-$basearch_alt-console
-            filename=$(curl -L $mirror/$dir/latest-$prefix.txt | grep '.qcow2' | awk '{print $1}' | grep .)
-            file=$mirror/$dir/$filename
-            test_url "$file" 'qemu'
-            set_osvar img "$file"
+            if [ -z "$img" ]; then
+                # 使用 systemd 且没有 cloud-init
+                prefix=di-$basearch_alt-console
+                filename=$(curl -L $mirror/$dir/latest-$prefix.txt | grep '.qcow2' | awk '{print $1}' | grep .)
+                img=$mirror/$dir/$filename
+            fi
+            test_url "$img" 'qemu'
         else
-            prefix=stage3-$basearch_alt-systemd
-            filename=$(curl -L $mirror/$dir/latest-$prefix.txt | grep '.tar.xz' | awk '{print $1}' | grep .)
-            file=$mirror/$dir/$filename
-            test_url "$file" 'tar.xz'
-            set_osvar img "$file"
+            if [ -z "$img" ]; then
+                prefix=stage3-$basearch_alt-systemd
+                filename=$(curl -L $mirror/$dir/latest-$prefix.txt | grep '.tar.xz' | awk '{print $1}' | grep .)
+                img=$mirror/$dir/$filename
+                test_url "$img" 'tar.xz'
+            fi
         fi
+        set_osvar img "$img"
     }
 
     setos_opensuse() {
@@ -1674,34 +1686,37 @@ Continue?
         #          https://mirrors.ustc.edu.cn/opensuse/ports/aarch64/tumbleweed/appliances/
         # https://mirrors.tuna.tsinghua.edu.cn/opensuse/ports/aarch64/tumbleweed/appliances/
 
-        if is_in_china; then
-            mirror=https://mirror.nju.edu.cn/opensuse
-        else
-            mirror=https://downloadcontentcdn.opensuse.org
-        fi
-
-        if [ "$releasever" = tumbleweed ]; then
-            # tumbleweed
-            if [ "$basearch" = aarch64 ]; then
-                dir=ports/aarch64/tumbleweed/appliances
+        if [ -z "$img" ]; then
+            if is_in_china; then
+                mirror=https://mirror.nju.edu.cn/opensuse
             else
-                dir=tumbleweed/appliances
+                mirror=https://downloadcontentcdn.opensuse.org
             fi
-            file=openSUSE-Tumbleweed-Minimal-VM.$basearch-Cloud.qcow2
-        else
-            # leap
-            dir=distribution/leap/$releasever/appliances
-            case "$releasever" in
-            16.0) file=Leap-$releasever-Minimal-VM.$basearch-Cloud.qcow2 ;;
-            # 16.0) file=Leap-$releasever-Minimal-VM.$basearch-kvm$(if [ "$basearch" = x86_64 ]; then echo '-and-xen'; fi).qcow2 ;;
-            esac
 
-            # https://src.opensuse.org/openSUSE/Leap-Images/src/branch/leap-16.0/kiwi-templates-Minimal/Minimal.kiwi
-            # https://build.opensuse.org/projects/Virtualization:Appliances:Images:openSUSE-Tumbleweed/packages/kiwi-templates-Minimal/files/Minimal.kiwi
-            # 有专门的kvm镜像，openSUSE-Leap-15.5-Minimal-VM.x86_64-kvm-and-xen.qcow2，里面没有cloud-init
-            # file=openSUSE-Leap-15.5-Minimal-VM.x86_64-kvm-and-xen.qcow2
+            if [ "$releasever" = tumbleweed ]; then
+                # tumbleweed
+                if [ "$basearch" = aarch64 ]; then
+                    dir=ports/aarch64/tumbleweed/appliances
+                else
+                    dir=tumbleweed/appliances
+                fi
+                file=openSUSE-Tumbleweed-Minimal-VM.$basearch-Cloud.qcow2
+            else
+                # leap
+                dir=distribution/leap/$releasever/appliances
+                case "$releasever" in
+                16.0) file=Leap-$releasever-Minimal-VM.$basearch-Cloud.qcow2 ;;
+                # 16.0) file=Leap-$releasever-Minimal-VM.$basearch-kvm$(if [ "$basearch" = x86_64 ]; then echo '-and-xen'; fi).qcow2 ;;
+                esac
+
+                # https://src.opensuse.org/openSUSE/Leap-Images/src/branch/leap-16.0/kiwi-templates-Minimal/Minimal.kiwi
+                # https://build.opensuse.org/projects/Virtualization:Appliances:Images:openSUSE-Tumbleweed/packages/kiwi-templates-Minimal/files/Minimal.kiwi
+                # 有专门的kvm镜像，openSUSE-Leap-15.5-Minimal-VM.x86_64-kvm-and-xen.qcow2，里面没有cloud-init
+                # file=openSUSE-Leap-15.5-Minimal-VM.x86_64-kvm-and-xen.qcow2
+            fi
+            img=$mirror/$dir/$file
         fi
-        set_osvar img "$mirror/$dir/$file"
+        set_osvar img "$img"
     }
 
     setos_windows() {
@@ -1887,18 +1902,20 @@ Continue with DD?
     }
 
     setos_aosc() {
-        if is_in_china; then
-            mirror=https://mirror.nju.edu.cn/anthon/aosc-os
-        else
-            # 服务器在香港
-            mirror=https://releases.aosc.io
-        fi
+        if [ -z "$img" ]; then
+            if is_in_china; then
+                mirror=https://mirror.nju.edu.cn/anthon/aosc-os
+            else
+                # 服务器在香港
+                mirror=https://releases.aosc.io
+            fi
 
-        dir=os-$basearch_alt/base
-        file=$(curl -L $mirror/$dir/ | grep -oP 'aosc-os_base_.*?\.tar.xz' |
-            sort -uV | tail -1 | grep .)
-        img=$mirror/$dir/$file
-        test_url $img 'tar.xz'
+            dir=os-$basearch_alt/base
+            file=$(curl -L $mirror/$dir/ | grep -oP 'aosc-os_base_.*?\.tar.xz' |
+                sort -uV | tail -1 | grep .)
+            img=$mirror/$dir/$file
+        fi
+        test_url "$img" 'tar.xz'
         set_osvar img "$img"
     }
 
@@ -1919,52 +1936,53 @@ Continue with DD?
 
         if is_use_cloud_image; then
             # ci
-            if is_in_china; then
+            if [ -z "$img" ]; then
+                if is_in_china; then
+                    case $distro in
+                    centos) ci_mirror="https://mirror.nju.edu.cn/centos-cloud/centos" ;;
+                    almalinux) ci_mirror="https://mirror.nju.edu.cn/almalinux/$releasever/cloud/$elarch/images" ;;
+                    rocky) ci_mirror="https://mirror.nju.edu.cn/rocky/$releasever/images/$elarch" ;;
+                    fedora) ci_mirror="https://mirror.nju.edu.cn/fedora/releases/$releasever/Cloud/$elarch/images" ;;
+                    esac
+                else
+                    case $distro in
+                    centos) ci_mirror="https://cloud.centos.org/centos" ;;
+                    almalinux) ci_mirror="https://repo.almalinux.org/almalinux/$releasever/cloud/$elarch/images" ;;
+                    rocky) ci_mirror="https://download.rockylinux.org/pub/rocky/$releasever/images/$elarch" ;;
+                    fedora) ci_mirror="https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/$releasever/Cloud/$elarch/images" ;;
+                    esac
+                fi
                 case $distro in
-                centos) ci_mirror="https://mirror.nju.edu.cn/centos-cloud/centos" ;;
-                almalinux) ci_mirror="https://mirror.nju.edu.cn/almalinux/$releasever/cloud/$elarch/images" ;;
-                rocky) ci_mirror="https://mirror.nju.edu.cn/rocky/$releasever/images/$elarch" ;;
-                fedora) ci_mirror="https://mirror.nju.edu.cn/fedora/releases/$releasever/Cloud/$elarch/images" ;;
-                esac
-            else
-                case $distro in
-                centos) ci_mirror="https://cloud.centos.org/centos" ;;
-                almalinux) ci_mirror="https://repo.almalinux.org/almalinux/$releasever/cloud/$elarch/images" ;;
-                rocky) ci_mirror="https://download.rockylinux.org/pub/rocky/$releasever/images/$elarch" ;;
-                fedora) ci_mirror="https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/$releasever/Cloud/$elarch/images" ;;
+                centos)
+                    case $releasever in
+                    7)
+                        # CentOS-7-aarch64-GenericCloud.qcow2c 是旧版本
+                        ver=-2211
+                        img=$ci_mirror/$releasever/images/CentOS-$releasever-$elarch-GenericCloud$ver.qcow2c
+                        ;;
+                    *)
+                        # 有 bios 和 efi 镜像
+                        # https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2
+                        # https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-10-latest.x86_64.qcow2
+                        [ "$elarch" = x86_64 ] &&
+                            img=$ci_mirror/$releasever-stream/$elarch/images/CentOS-Stream-GenericCloud-x86_64-$releasever-latest.$elarch.qcow2 ||
+                            img=$ci_mirror/$releasever-stream/$elarch/images/CentOS-Stream-GenericCloud-$releasever-latest.$elarch.qcow2
+                        ;;
+                    esac
+                    ;;
+                almalinux) img=$ci_mirror/AlmaLinux-$releasever-GenericCloud-latest.$elarch.qcow2 ;;
+                rocky) img=$ci_mirror/Rocky-$releasever-GenericCloud-Base.latest.$elarch.qcow2 ;;
+                fedora)
+                    # 不加 / 会跳转到 https://dl.fedoraproject.org，纯 ipv6 无法访问
+                    # curl -L -6 https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/42/Cloud/x86_64/images
+                    # curl -L -6 https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/42/Cloud/x86_64/images/
+                    filename=$(curl -L $ci_mirror/ | grep -oP "Fedora-Cloud-Base-Generic.*?.qcow2" |
+                        sort -uV | tail -1 | grep .)
+                    img=$ci_mirror/$filename
+                    ;;
                 esac
             fi
-            case $distro in
-            centos)
-                case $releasever in
-                7)
-                    # CentOS-7-aarch64-GenericCloud.qcow2c 是旧版本
-                    ver=-2211
-                    ci_image=$ci_mirror/$releasever/images/CentOS-$releasever-$elarch-GenericCloud$ver.qcow2c
-                    ;;
-                *)
-                    # 有 bios 和 efi 镜像
-                    # https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2
-                    # https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-10-latest.x86_64.qcow2
-                    [ "$elarch" = x86_64 ] &&
-                        ci_image=$ci_mirror/$releasever-stream/$elarch/images/CentOS-Stream-GenericCloud-x86_64-$releasever-latest.$elarch.qcow2 ||
-                        ci_image=$ci_mirror/$releasever-stream/$elarch/images/CentOS-Stream-GenericCloud-$releasever-latest.$elarch.qcow2
-                    ;;
-                esac
-                ;;
-            almalinux) ci_image=$ci_mirror/AlmaLinux-$releasever-GenericCloud-latest.$elarch.qcow2 ;;
-            rocky) ci_image=$ci_mirror/Rocky-$releasever-GenericCloud-Base.latest.$elarch.qcow2 ;;
-            fedora)
-                # 不加 / 会跳转到 https://dl.fedoraproject.org，纯 ipv6 无法访问
-                # curl -L -6 https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/42/Cloud/x86_64/images
-                # curl -L -6 https://d2lzkl7pfhq30w.cloudfront.net/pub/fedora/linux/releases/42/Cloud/x86_64/images/
-                filename=$(curl -L $ci_mirror/ | grep -oP "Fedora-Cloud-Base-Generic.*?.qcow2" |
-                    sort -uV | tail -1 | grep .)
-                ci_image=$ci_mirror/$filename
-                ;;
-            esac
-
-            set_osvar img "$ci_image"
+            set_osvar img "$img"
         else
             # 传统安装
             case $distro in
@@ -2006,18 +2024,19 @@ Continue with DD?
 
         if is_use_cloud_image; then
             # ci
-            install_pkg jq
-            mirror=https://yum.oracle.com
+            if [ -z "$img" ]; then
+                install_pkg jq
+                mirror=https://yum.oracle.com
 
-            [ "$basearch" = aarch64 ] &&
-                template_prefix=ol${releasever}_${basearch}-cloud ||
-                template_prefix=ol${releasever}
-            curl -Lo $tmp/oracle.json $mirror/templates/OracleLinux/$template_prefix-template.json
-            dir=$(jq -r .base_url $tmp/oracle.json)
-            file=$(jq -r .kvm.image $tmp/oracle.json)
-            ci_image=$mirror$dir/$file
-
-            set_osvar img "$ci_image"
+                [ "$basearch" = aarch64 ] &&
+                    template_prefix=ol${releasever}_${basearch}-cloud ||
+                    template_prefix=ol${releasever}
+                curl -Lo $tmp/oracle.json $mirror/templates/OracleLinux/$template_prefix-template.json
+                dir=$(jq -r .base_url $tmp/oracle.json)
+                file=$(jq -r .kvm.image $tmp/oracle.json)
+                img=$mirror$dir/$file
+            fi
+            set_osvar img "$img"
         else
             :
         fi
@@ -2046,15 +2065,18 @@ Continue with DD?
 
         if is_use_cloud_image; then
             # ci
-            if [ "$releasever" -eq 9 ]; then
-                dir=$releasever/images/qcow2/$basearch
-            else
-                dir=$releasever/images/$basearch
-            fi
+            if [ -z "$img" ]; then
+                if [ "$releasever" -eq 9 ]; then
+                    dir=$releasever/images/qcow2/$basearch
+                else
+                    dir=$releasever/images/$basearch
+                fi
 
-            file=$(curl -L $mirror/$dir/ | grep -oP 'OpenCloudOS.*?\.qcow2' |
-                sort -uV | tail -1 | grep .)
-            set_osvar img "$mirror/$dir/$file"
+                file=$(curl -L $mirror/$dir/ | grep -oP 'OpenCloudOS.*?\.qcow2' |
+                    sort -uV | tail -1 | grep .)
+                img=$mirror/$dir/$file
+            fi
+            set_osvar img "$img"
         else
             :
         fi
@@ -2064,13 +2086,16 @@ Continue with DD?
         mirror=https://mirrors.openanolis.cn/anolis
         if is_use_cloud_image; then
             # ci
-            dir=$releasever/isos/GA/$basearch
-            [ "$releasever" -ge 23 ] &&
-                filename='AnolisOS.*?\.qcow2' ||
-                filename='AnolisOS.*?-ANCK\.qcow2'
-            file=$(curl -L $mirror/$dir/ | grep -oP "$filename" |
-                sort -uV | tail -1 | grep .)
-            set_osvar img "$mirror/$dir/$file"
+            if [ -z "$img" ]; then
+                dir=$releasever/isos/GA/$basearch
+                [ "$releasever" -ge 23 ] &&
+                    filename='AnolisOS.*?\.qcow2' ||
+                    filename='AnolisOS.*?-ANCK\.qcow2'
+                file=$(curl -L $mirror/$dir/ | grep -oP "$filename" |
+                    sort -uV | tail -1 | grep .)
+                img=$mirror/$dir/$file
+            fi
+            set_osvar img "$img"
         else
             :
         fi
@@ -2084,9 +2109,12 @@ Continue with DD?
         fi
         if is_use_cloud_image; then
             # ci
-            name=$(curl -L "$mirror/" | grep -oE "openEuler-$releasever(-LTS)?(-SP[0-9])?" |
-                sort -uV | tail -1 | grep .)
-            set_osvar img "$mirror/$name/virtual_machine_img/$basearch/$name-$basearch.qcow2.xz"
+            if [ -z "$img" ]; then
+                name=$(curl -L "$mirror/" | grep -oE "openEuler-$releasever(-LTS)?(-SP[0-9])?" |
+                    sort -uV | tail -1 | grep .)
+                img=$mirror/$name/virtual_machine_img/$basearch/$name-$basearch.qcow2.xz
+            fi
+            set_osvar img "$img"
         else
             :
         fi
