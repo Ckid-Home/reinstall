@@ -5419,57 +5419,76 @@ EOF
             # sysconfig
             info 'sysconfig'
 
-            # anolis/openeuler/opencloudos 可能要安装 cloud-init
-            # opencloudos 无法使用 chroot $os_dir command -v xxx
-            # chroot: failed to run command ‘command’: No such file or directory
-            # 注意还要禁用 cloud-init 服务
-            if ! is_have_cmd_on_disk $os_dir cloud-init; then
-                chroot_dnf install cloud-init
+            # 使用目标系统内的 cloud-init
+            # 保留这个，防止未来新版本 cloud-init 不支持 sysconfig
+            if false; then
+                # anolis/openeuler/opencloudos 可能要安装 cloud-init
+                # opencloudos 无法使用 chroot $os_dir command -v xxx
+                # chroot: failed to run command ‘command’: No such file or directory
+                # 注意还要禁用 cloud-init 服务
+                if ! is_have_cmd_on_disk $os_dir cloud-init; then
+                    chroot_dnf install cloud-init
+                fi
+
+                # cloud-init 路径
+                # /usr/lib/python2.7/site-packages/cloudinit/net/
+                # /usr/lib/python3/dist-packages/cloudinit/net/
+                # /usr/lib/python3.9/site-packages/cloudinit/net/
+
+                # el7 不认识 static6，但可改成 static，作用相同
+                recognize_static6=true
+                if ls $os_dir/usr/lib/python*/*-packages/cloudinit/net/sysconfig.py 2>/dev/null &&
+                    ! grep -q static6 $os_dir/usr/lib/python*/*-packages/cloudinit/net/sysconfig.py; then
+                    recognize_static6=false
+                fi
+
+                # cloud-init 20.1 才支持以下配置
+                # https://cloudinit.readthedocs.io/en/20.4/topics/network-config-format-v1.html#subnet-ip
+                # https://cloudinit.readthedocs.io/en/21.1/topics/network-config-format-v1.html#subnet-ip
+                # ipv6_dhcpv6-stateful: Configure this interface with dhcp6
+                # ipv6_dhcpv6-stateless: Configure this interface with SLAAC and DHCP
+                # ipv6_slaac: Configure address with SLAAC
+
+                # el7 最新 cloud-init 版本
+                # centos 7         19.4-7.0.5.el7_9.6  backport 了 ipv6_xxx
+                # openeuler 20.03  19.4-15.oe2003sp4   backport 了 ipv6_xxx
+                # anolis 7         19.1.17-1.0.1.an7   没有更新到 centos7 相同版本,也没 backport ipv6_xxx，坑
+
+                # 最好还修改 ifcfg-eth* 的 IPV6_AUTOCONF
+                # 但实测 anolis7 cloud-init dhcp6 不会生成 IPV6_AUTOCONF，因此暂时不管
+                # https://www.redhat.com/zh/blog/configuring-ipv6-rhel-7-8
+                recognize_ipv6_types=true
+                if ls -d $os_dir/usr/lib/python*/*-packages/cloudinit/net/ 2>/dev/null &&
+                    ! grep -qr ipv6_slaac $os_dir/usr/lib/python*/*-packages/cloudinit/net/; then
+                    recognize_ipv6_types=false
+                fi
+
+                # 生成 cloud-init 网络配置
+                create_cloud_init_network_config $os_dir/net.cfg "$recognize_static6" "$recognize_ipv6_types"
+
+                # 转换成目标系统的网络配置
+                chroot $os_dir cloud-init devel net-convert \
+                    -p /net.cfg -k yaml -d out -D rhel -O sysconfig
+                cp $os_dir/out/etc/sysconfig/network-scripts/ifcfg-eth* $os_dir/etc/sysconfig/network-scripts/
+
+                # 清理
+                rm -rf $os_dir/net.cfg $os_dir/out
+            else
+                # 使用 alpine 的 cloud-init
+
+                # 生成 cloud-init 网络配置
+                create_cloud_init_network_config net.cfg
+
+                # 转换成目标系统的网络配置
+                apk add cloud-init-distros
+                cloud-init devel net-convert \
+                    -p /net.cfg -k yaml -d out -D rhel -O sysconfig
+                cp out/etc/sysconfig/network-scripts/ifcfg-eth* $os_dir/etc/sysconfig/network-scripts/
+
+                # 清理
+                rm -rf net.cfg out
+                apk del cloud-init-distros
             fi
-
-            # cloud-init 路径
-            # /usr/lib/python2.7/site-packages/cloudinit/net/
-            # /usr/lib/python3/dist-packages/cloudinit/net/
-            # /usr/lib/python3.9/site-packages/cloudinit/net/
-
-            # el7 不认识 static6，但可改成 static，作用相同
-            recognize_static6=true
-            if ls $os_dir/usr/lib/python*/*-packages/cloudinit/net/sysconfig.py 2>/dev/null &&
-                ! grep -q static6 $os_dir/usr/lib/python*/*-packages/cloudinit/net/sysconfig.py; then
-                recognize_static6=false
-            fi
-
-            # cloud-init 20.1 才支持以下配置
-            # https://cloudinit.readthedocs.io/en/20.4/topics/network-config-format-v1.html#subnet-ip
-            # https://cloudinit.readthedocs.io/en/21.1/topics/network-config-format-v1.html#subnet-ip
-            # ipv6_dhcpv6-stateful: Configure this interface with dhcp6
-            # ipv6_dhcpv6-stateless: Configure this interface with SLAAC and DHCP
-            # ipv6_slaac: Configure address with SLAAC
-
-            # el7 最新 cloud-init 版本
-            # centos 7         19.4-7.0.5.el7_9.6  backport 了 ipv6_xxx
-            # openeuler 20.03  19.4-15.oe2003sp4   backport 了 ipv6_xxx
-            # anolis 7         19.1.17-1.0.1.an7   没有更新到 centos7 相同版本,也没 backport ipv6_xxx，坑
-
-            # 最好还修改 ifcfg-eth* 的 IPV6_AUTOCONF
-            # 但实测 anolis7 cloud-init dhcp6 不会生成 IPV6_AUTOCONF，因此暂时不管
-            # https://www.redhat.com/zh/blog/configuring-ipv6-rhel-7-8
-            recognize_ipv6_types=true
-            if ls -d $os_dir/usr/lib/python*/*-packages/cloudinit/net/ 2>/dev/null &&
-                ! grep -qr ipv6_slaac $os_dir/usr/lib/python*/*-packages/cloudinit/net/; then
-                recognize_ipv6_types=false
-            fi
-
-            # 生成 cloud-init 网络配置
-            create_cloud_init_network_config $os_dir/net.cfg "$recognize_static6" "$recognize_ipv6_types"
-
-            # 转换成目标系统的网络配置
-            chroot $os_dir cloud-init devel net-convert \
-                -p /net.cfg -k yaml -d out -D rhel -O sysconfig
-            cp $os_dir/out/etc/sysconfig/network-scripts/ifcfg-eth* $os_dir/etc/sysconfig/network-scripts/
-
-            # 清理
-            rm -rf $os_dir/net.cfg $os_dir/out
 
             # 删除 # Created by cloud-init on instance boot automatically, do not edit.
             # 修正网络配置问题并显示文件
